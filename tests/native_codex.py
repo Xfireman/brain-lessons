@@ -182,6 +182,15 @@ def run_case(enabled):
                   'reminder_reached_model_input': any(x['reminder_visible'] for x in requests)}
         (case / 'events.json').write_text(json.dumps(client.events, indent=2))
         print(json.dumps(result), flush=True)
+        if not result['allowed_exists'] or result['blocked_shell_exists'] != (not enabled) or result['generated_exists'] != (not enabled):
+            diagnostics = []
+            for event in client.events:
+                item = event.get('params', {}).get('item', {})
+                if event.get('method') == 'item/completed' and item.get('type') in ('commandExecution', 'fileChange'):
+                    diagnostics.append({k: item.get(k) for k in ('type', 'status', 'exitCode', 'aggregatedOutput')})
+                elif event.get('method') == 'error':
+                    diagnostics.append(event.get('params', {}))
+            print('Native fixture diagnostics: ' + json.dumps(diagnostics)[:8000], flush=True)
         assert result['allowed_exists'], 'Allowed command did not execute'
         assert result['blocked_shell_exists'] == (not enabled), 'Shell decision not enforced'
         assert result['generated_exists'] == (not enabled), 'Patch decision not enforced'
