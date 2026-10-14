@@ -10,6 +10,10 @@ Codex first · Claude Code supported · Local files · No model calls · Python 
 
 [中文](README.zh-CN.md) · [Rule format](docs/rules.md) · [Privacy & limits](SECURITY.md) · [Contribute](CONTRIBUTING.md)
 
+![Scripted offline replay: save a correction, check examples, deny the matching patch](docs/assets/generated-client.gif)
+
+*Offline replay of actual hook decisions; no model or tool execution.*
+
 ## A concrete problem it can help with
 
 Suppose `src/generated/` is produced from `schema/api.json`. Direct edits to generated files will disappear the next time the client is regenerated. You have already explained this convention, but the agent proposes another patch to a generated file.
@@ -60,38 +64,47 @@ Clone or download this repository, then run from its directory:
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install .
-.venv/bin/brain-lessons demo
+.venv/bin/brain-lessons demo --scenario generated-client
 ```
 
-The offline demo uses a simpler test-runner rule: `npm test` is blocked, while `pnpm test` gets no Brain decision. It exercises the Codex adapter in a temporary project, without calling a model, executing those shell commands, or changing your project. It is a mechanism demo, not a recording of an agent learning on its own.
+The offline replay saves a generated-file rule, checks a matching and an allowed example, and feeds both patches to the actual Codex hook handler. It calls no model, executes no patch, and changes none of your files. [Reproduce the demo](docs/demo.md).
 
 ## Use it in a project
 
-The workflow is **save one rule → preview its matches → install and trust the hook once → work normally**. Later lesson changes are loaded on subsequent tool calls; they do not require reinstalling the integration.
+**Install once → describe a correction → review its scope → work normally.**
 
-### 1. Make the CLI available
+### 1. Install the hook and the Codex skill
 
-To use the installed CLI in your own project, add this virtual environment to the current shell's PATH before changing directories:
+From the repository where you installed the CLI above:
 
 ```sh
 export PATH="$PWD/.venv/bin:$PATH"
 cd /path/to/your/project
 brain-lessons init
+brain-lessons install codex --with-skill
 ```
 
-Keep the virtual environment in place while its hook is installed.
+This adds one project hook in `.codex/hooks.json` and the **brain-remember** skill in `.agents/skills/brain-remember/`. Existing hooks and unrelated skills are preserved. The skill uses the exact Python environment that installed it, so Codex does not need to inherit your terminal's PATH. Keep that environment in place. No extra model API key is required by Brain Lessons.
 
-If Codex cannot find `brain-lessons`, give it the absolute path to `.venv/bin/brain-lessons` in the installation directory; a desktop app may not inherit this terminal's PATH.
+Start a new Codex session in this project, with hooks enabled, and **review and trust the exact hook in `/hooks`**. The project must also be trusted. If hooks were disabled, start the CLI with `codex --enable hooks`. Installation never grants trust or changes global configuration.
 
-### 2. Save a rule yourself, or ask Codex to do it
+The same command upgrades a previous hook-only installation. Hand-edited skill files cause a visible conflict instead of being overwritten. The generated skill embeds local executable paths and carries a `.gitignore`; reinstall it on each machine. Share reviewed `.brain/lessons/*.json` rules separately.
 
-You do not have to type every `learn` command yourself. With the CLI available in the project, you can give Codex this request:
+### 2. Describe the correction in Codex
 
-> Use the installed `brain-lessons` CLI to save a project rule that blocks direct patch edits to `src/generated/`. The source of truth is `schema/api.json`; changes belong there before regenerating the client. Include an example that should match and one that should not, run `brain-lessons check`, and show me the saved rule and its matching scope.
+Adapt the paths to your project, then say:
 
-This is a request for Codex to operate the existing CLI, not a built-in automatic learning feature. Saying “remember this” alone does not create a Brain rule. Review the proposed scope before connecting or relying on it. Adapt these example paths to your project.
+```text
+$brain-remember Save a blocking rule: don't edit src/generated/ directly.
+Change schema/api.json, then regenerate. Editing src/main.py is allowed.
+Show the matching scope and check the examples.
+```
 
-The equivalent manual commands are:
+The skill reads the relevant project context, builds a narrow candidate, and runs `learn --dry-run` to check both examples **before writing**. It shows the scope, saves within your request, and verifies the saved rule. If you ask for a preview only, it stops before saving. If the paths are unclear, it asks instead of guessing.
+
+Use `$brain-remember` explicitly for a clear entry point. Codex can also select it when your request matches its description; implicit selection is model-dependent. This is agent-assisted authoring, not background collection of your conversations. Preferences such as "keep replies short" still belong in ordinary instructions or memory.
+
+You can also write the equivalent rule yourself:
 
 ```sh
 brain-lessons learn generated-client \
@@ -101,39 +114,32 @@ brain-lessons learn generated-client \
   --path "src/generated/*" \
   --sample-path "src/generated/client.py" \
   --miss-path "src/main.py" \
-  --action block
+  --action block --dry-run
+```
 
+This prints candidate JSON, two checked examples, and any problems without saving. Once satisfied, run the same command without `--dry-run`, then:
+
+```sh
 brain-lessons check
 brain-lessons recall --tool Edit --path src/generated/client.py
+brain-lessons recall --tool Edit --path src/main.py
 ```
 
-Your correction lives in `.brain/lessons/generated-client.json`. In an otherwise empty lesson store, `check` should report two examples and zero problems; `recall` should show this block rule and its source without executing an edit. Edit the file directly, review it in Git, or set `enabled` to `false`. Learning the same ID again refuses to overwrite it.
+In an empty store, the check should report one rule, two examples, and zero problems. The first preview shows a block; the second has no match. The rule lives in `.brain/lessons/generated-client.json`. Existing IDs are never silently overwritten. `remind` is the default; use `block` only when you want matching calls denied.
 
-`remind` is the default action. `block` must be chosen explicitly. Preview matching rules before installing the hook.
+### 3. Work normally, or undo the installation
 
-### 3. Connect Codex once for this project
-
-From the project where the rules should apply:
+Once the hook is active, the host checks matching calls automatically. Rule edits are loaded on the next call; no reinstall is needed. A changed hook definition needs trust review again. Generated-path rules cover native Codex `apply_patch`, including multi-file edits and both sides of moves; they do not inspect arbitrary shell-based writes.
 
 ```sh
-brain-lessons install codex
+brain-lessons uninstall codex --with-skill
 ```
 
-This adds one `PreToolUse` hook to **project-local** `.codex/hooks.json`, preserving other hooks and settings. It handles Codex shell calls and `apply_patch`, including multiple files and both sides of a move.
+This removes the managed hook and unmodified managed skill files, while keeping lessons, other hooks, and other skills. Edited skill files are preserved and reported as a conflict. Without `--with-skill`, install/uninstall retains the original hook-only behavior.
 
-Start a new Codex session in this project. The project must be trusted, hooks must be enabled, and you must **review and trust the exact hook in `/hooks`** before it runs. If you disabled hooks, start the CLI with `codex --enable hooks`. Installing Brain does not grant hook trust or change your global Codex configuration. Changed hook definitions need review again.
+A reminder adds context; a block returns the host's `deny` decision for the matching call. Brain never grants permissions. See the official [hook contract](https://learn.chatgpt.com/docs/hooks) and [skill discovery documentation](https://learn.chatgpt.com/docs/build-skills). Installation targets macOS and Linux; native host acceptance is currently macOS only.
 
-After trust is granted, work with Codex normally. There is no extra Brain command to run before each edit; the host invokes the hook. Only defined matches trigger a lesson.
-
-To remove the integration while keeping your lessons:
-
-```sh
-brain-lessons uninstall codex
-```
-
-Live model obedience is a separate outcome: a reminder is additional context, not a guarantee that the agent will change its next action. A block returns the host's explicit `deny` decision. Brain never returns an `allow` decision and never grants permissions.
-
-See the [official Codex hook contract](https://learn.chatgpt.com/docs/hooks). Automatic installation currently targets macOS and Linux.
+**Trying it for the first time?** Follow the [short trial guide](docs/try-it.md) and tell us where the workflow breaks. A useful result includes a false positive or a reason you preferred plain instructions.
 
 ## Claude Code support
 
@@ -150,12 +156,12 @@ See the [official Claude Code hook contract](https://code.claude.com/docs/en/hoo
 ## Commands
 
 - `init` — create the local store without overwriting existing files.
-- `learn` — save a correction with triggers and examples.
+- `learn` — save a correction; `--dry-run` checks positive and negative examples without writing.
 - `list` — inspect the complete rule set.
 - `recall` — preview matching rules without running the proposed command.
 - `check` — validate rules and run their positive/negative examples.
-- `install codex` / `uninstall codex` — manage the Codex project hook; `claude-code` is also supported.
-- `demo` — see the complete offline example.
+- `install codex --with-skill` / `uninstall codex --with-skill` — manage the Codex hook and natural-language skill. Omit the flag for hook-only behavior; `claude-code` also supports hooks.
+- `demo --scenario generated-client` — replay the generated-file example offline; add `--json` for actual decisions. `demo` alone retains the test-runner example.
 
 Use `--help` for arguments. Global `--root /path/to/project` goes before the command. JSON output is available for `list`, `recall`, and `check`.
 

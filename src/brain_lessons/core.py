@@ -116,17 +116,21 @@ def validate(value, filename=None):
     return value
 
 
+def lesson_files(root: Path):
+    directory = safe_path(root, ".brain/lessons")
+    try:
+        with os.scandir(directory) as entries:
+            return sorted(Path(entry.path) for entry in entries if entry.name.endswith(".json"))
+    except FileNotFoundError:
+        return []
+
+
 def load_lessons(root: Path):
     lessons, problems = [], []
     try:
-        directory = safe_path(root, ".brain/lessons")
+        files = lesson_files(root)
     except LessonError as exc:
         return [], [str(exc)]
-    try:
-        with os.scandir(directory) as entries:
-            files = sorted(Path(entry.path) for entry in entries if entry.name.endswith(".json"))
-    except FileNotFoundError:
-        return [], []
     except NotADirectoryError:
         return [], ["Lesson store must be a directory"]
     except OSError:
@@ -207,12 +211,14 @@ def context(result):
     return "\n\n".join(parts)
 
 
-def check(root):
-    lessons, problems = load_lessons(root)
+def check_examples(root, lessons, *, require_miss=False):
+    problems = []
     checked = 0
     for lesson in lessons:
         if not lesson["examples"]["match"]:
             problems.append(f'{lesson["id"]}: no positive example; add one before relying on this rule')
+        if require_miss and not lesson["examples"]["miss"]:
+            problems.append(f'{lesson["id"]}: no negative example; add a nearby allowed action')
         for outcome, expected in (("match", True), ("miss", False)):
             for i, case in enumerate(lesson["examples"][outcome], 1):
                 checked += 1
@@ -220,3 +226,10 @@ def check(root):
                 if actual != expected:
                     problems.append(f'{lesson["id"]}: {outcome} example {i} failed')
     return {"lessons": len(lessons), "examples_checked": checked, "problems": problems}
+
+
+def check(root):
+    lessons, problems = load_lessons(root)
+    result = check_examples(root, lessons)
+    result["problems"] = problems + result["problems"]
+    return result

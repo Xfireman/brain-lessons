@@ -1,0 +1,22 @@
+{
+  "scenario": "generated-client",
+  "model_called": false,
+  "tools_executed": false,
+  "checks": {
+    "lessons": 1,
+    "examples_checked": 2,
+    "problems": []
+  },
+  "calls": [
+    {
+      "path": "src/generated/client.py",
+      "decision": "deny",
+      "reason": "Brain Lessons: project rules selected for this tool call.\n\n[block] Edit the schema, then regenerate (.brain/lessons/generated-client.json)\nDo not edit src/generated/ directly. Change schema/api.json, then regenerate the client."
+    },
+    {
+      "path": "src/main.py",
+      "decision": "none",
+      "reason": ""
+    }
+  ]
+}

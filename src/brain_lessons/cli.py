@@ -8,7 +8,7 @@ import tempfile
 
 from . import __version__
 from .adapters import ADAPTERS
-from .core import LessonError, check, context, find_root, load_lessons, recall, safe_path, validate
+from .core import MAX_LESSONS, MAX_RULE_BYTES, LessonError, check, check_examples, context, find_root, lesson_files, load_lessons, recall, safe_path, validate
 from .hooks import hook, install, uninstall
 
 
@@ -26,6 +26,7 @@ def parser():
     learn.add_argument("--command", action="append", default=[], help="Consecutive shell tokens to match (not a regex)")
     learn.add_argument("--path", action="append", default=[], help="Project-relative path glob")
     learn.add_argument("--action", choices=["remind", "block"], default="remind")
+    learn.add_argument("--dry-run", action="store_true", help="Preview JSON and verify positive/negative examples without writing")
     for option in ("sample-command", "miss-command", "sample-path", "miss-path"):
         learn.add_argument("--" + option, action="append", default=[])
     ls = sub.add_parser("list", help="List local lessons and validation problems")
@@ -40,9 +41,12 @@ def parser():
     for verb in ("install", "uninstall"):
         cmd = sub.add_parser(verb, help=verb.capitalize() + " the project-local hook")
         cmd.add_argument("adapter", choices=ADAPTERS)
+        cmd.add_argument("--with-skill", action="store_true", help="Also manage the project-local Codex brain-remember skill")
     handler = sub.add_parser("hook", help="Read a host PreToolUse event on stdin")
     handler.add_argument("--adapter", choices=ADAPTERS, default="claude-code", help="Host protocol (legacy default: claude-code; installers set it explicitly)")
-    sub.add_parser("demo", help="Run a synthetic, offline demo in a disposable directory")
+    demo_parser = sub.add_parser("demo", help="Run a synthetic, offline demo in a disposable directory")
+    demo_parser.add_argument("--scenario", choices=["project-tests", "generated-client"], default="project-tests")
+    demo_parser.add_argument("--json", action="store_true", help="Structured output for the generated-client scenario")
     return p
 
 
@@ -70,14 +74,27 @@ def learn(root, args):
     value = validate({"schema_version": 1, "id": args.id, "title": args.title,
                       "instruction": args.instruction, "enabled": True, "action": args.action,
                       "match": {"tools": tools, "commands": args.command, "paths": args.path}, "examples": examples})
+    serialized = json.dumps(value, indent=2, ensure_ascii=False) + "\n"
+    if len(serialized.encode("utf-8")) > MAX_RULE_BYTES:
+        raise LessonError("Lesson exceeds 64 KiB; narrow the rule or shorten its examples")
     path = safe_path(root, f".brain/lessons/{value['id']}.json")
+    existing = lesson_files(root)
+    if path not in existing and len(existing) >= MAX_LESSONS:
+        raise LessonError(f"Lesson store limit is {MAX_LESSONS}; consolidate rules before adding another")
+    if args.dry_run:
+        result = check_examples(root, [value], require_miss=True)
+        if path.exists():
+            result["problems"].append("Lesson already exists; review and edit it explicitly instead of creating a duplicate")
+        print(json.dumps({"lesson": value, **result}, indent=2, ensure_ascii=False))
+        return int(bool(result["problems"]))
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with path.open("x", encoding="utf-8") as handle:
-            handle.write(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+            handle.write(serialized)
     except FileExistsError:
         raise LessonError("Lesson already exists; edit its JSON explicitly instead of overwriting") from None
     print(f"Saved .brain/lessons/{value['id']}.json ({value['action']}). Run brain-lessons check.")
+    return 0
 
 
 def demo():
@@ -111,7 +128,13 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         if args.verb == "demo":
-            demo()
+            if args.scenario == "generated-client":
+                from .onboarding import generated_demo
+                generated_demo(as_json=args.json)
+            elif args.json:
+                raise LessonError("--json is supported with --scenario generated-client")
+            else:
+                demo()
             return 0
         root = args.root.resolve() if args.root else find_root(Path.cwd())
         if not root.is_dir():
@@ -121,7 +144,7 @@ def main(argv=None):
         if args.verb == "init":
             init(root)
         elif args.verb == "learn":
-            learn(root, args)
+            return learn(root, args)
         elif args.verb == "recall":
             result = recall(root, args.tool, args.command, args.path, root if args.root else Path.cwd())
             print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
@@ -150,9 +173,21 @@ def main(argv=None):
                     print(problem)
             return int(bool(result["problems"]))
         elif args.verb == "install":
-            print(install(root, args.adapter))
+            if args.with_skill:
+                from .onboarding import manage_codex
+                if args.adapter != "codex":
+                    raise LessonError("--with-skill currently supports codex only")
+                print(manage_codex(root, remove=False))
+            else:
+                print(install(root, args.adapter))
         elif args.verb == "uninstall":
-            print(uninstall(root, args.adapter))
+            if args.with_skill:
+                from .onboarding import manage_codex
+                if args.adapter != "codex":
+                    raise LessonError("--with-skill currently supports codex only")
+                print(manage_codex(root, remove=True))
+            else:
+                print(uninstall(root, args.adapter))
         return 0
     except (LessonError, OSError) as exc:
         message = str(exc) if isinstance(exc, LessonError) else "Filesystem operation failed; check local permissions"

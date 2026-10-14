@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- Added the optional Codex `brain-remember` skill for explicit, natural-language project corrections. It previews concrete scope, checks examples, and respects preview-only requests; it does not collect conversations automatically.
+- Added `learn --dry-run` to validate positive and negative examples without writing a rule. Existing rule IDs are reported as conflicts.
+- Preview and save both enforce the loader's existing rule-size and store-capacity limits, so authoring cannot silently create an unloadable rule or overflow the store.
+- Added `install codex --with-skill` and the matching uninstall command. Managed skill files are protected against overwriting user edits; failed operations restore prior managed files. Existing hook-only commands remain available.
+- Added a generated-client offline replay, a reproducible 20-second GIF, bilingual trial guides, and a feedback issue template.
+- Native Codex acceptance now also checks discovery of the installed skill. Model-driven skill trials are separate from deterministic hook acceptance.
+
 ## 0.2.0
 
 - Codex is now the primary documented integration, using project `.codex/hooks.json`.

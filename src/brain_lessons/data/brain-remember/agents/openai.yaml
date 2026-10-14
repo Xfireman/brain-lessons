@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brain Remember"
+  short_description: "Save a correction as a tested project rule"
+  default_prompt: "Use $brain-remember to save this project correction with a matching example and an allowed example."

@@ -10,6 +10,10 @@ Codex 优先 · 兼容 Claude Code · 本地文件 · 不调用模型 · Python 
 
 [English](README.md) · [规则格式](docs/rules.md) · [隐私与边界](SECURITY.md)
 
+![离线演示：保存纠正、检查样例、阻止命中的补丁](docs/assets/generated-client.gif)
+
+*真实 hook 决策的离线回放；没有调用模型或执行工具。*
+
 ## 它能帮你解决什么
 
 假设 `src/generated/` 是根据 `schema/api.json` 生成的客户端代码。直接修改生成文件，下次重新生成时改动就会丢失。你已经解释过这条规矩，但 AI 又准备对生成文件打补丁。
@@ -60,38 +64,47 @@ Brain 本身不需要 API key、数据库或后台服务。你的编程助手仍
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install .
-.venv/bin/brain-lessons demo
+.venv/bin/brain-lessons demo --scenario generated-client
 ```
 
-离线 demo 使用更简单的测试命令示例：阻止 `npm test`，对 `pnpm test` 不作决定。它在临时项目中调用 Codex 适配器，不调用模型、不实际执行这些命令，也不修改你的项目。它演示的是规则机制，不是 AI 自动学习的录像。
+演示会保存生成文件规则、检查正反例，并将两种补丁送进真实的 Codex hook 处理器。它不调用模型、不实际执行补丁、不修改你的文件。[复现说明](docs/demo.md)。
 
 ## 在实际项目中使用
 
-顺序是：**保存一条规则 → 预览匹配结果 → 安装并信任一次 → 照常工作**。后续修改规则会在下一次工具调用时加载，无须重新安装集成。
+顺序是：**安装一次 → 用一句话描述纠正 → 看清匹配范围 → 照常工作**。
 
-### 1. 让项目能调用 CLI
+### 1. 一起安装 hook 和 Codex 技能
 
-继续在自己的项目使用时，先把刚安装的 CLI 加到当前终端 PATH，再切换目录：
+继续在刚才安装 CLI 的仓库目录执行：
 
 ```sh
 export PATH="$PWD/.venv/bin:$PATH"
 cd /path/to/your/project
 brain-lessons init
+brain-lessons install codex --with-skill
 ```
 
-hook 使用期间请保留该虚拟环境。无须安装 Obsidian、复制别人整套知识库或提供 API key。
+这会添加项目 `.codex/hooks.json` 中的一条 hook，以及 `.agents/skills/brain-remember/` 下的技能，保留已有的其他配置。技能记录了安装时 Python 的准确路径，Codex 无须继承终端 PATH；请保留该虚拟环境。Brain Lessons 不需要额外的模型 API key。
 
-如果 Codex 提示找不到 `brain-lessons`，把安装目录下 `.venv/bin/brain-lessons` 的绝对路径交给它；桌面应用不一定继承当前终端的 PATH。
+在这个项目开启新的 Codex 会话，启用 hooks，并在 **`/hooks` 中审阅和信任这条 hook**；项目本身也必须受信任。此前关闭过 hooks 时，可用 `codex --enable hooks` 启动 CLI。安装器不代授信任，不修改全局配置。
 
-### 2. 自己录入，或让 Codex 代你录入
+原来只安装过 hook 的用户，也运行同一条安装命令升级。手工改过的技能会提示冲突，不会被覆盖。生成的技能含本机程序路径，自带 `.gitignore`，每台机器重新安装即可；可以单独分享经过审阅的 `.brain/lessons/*.json`。
 
-你不必亲自敲每条 `learn` 命令。项目中已能调用 CLI 后，可以这样对 Codex 说：
+### 2. 在 Codex 中用一句话保存规矩
 
-> 请使用已安装的 `brain-lessons` CLI 保存一条项目规则：阻止直接用补丁修改 `src/generated/`。真源是 `schema/api.json`，应先修改 schema 再生成客户端。加入一个应该命中和一个不应命中的例子，运行 `brain-lessons check`，把保存的规则和生效范围展示给我。
+按项目调整路径，然后说：
 
-这是让 Codex 操作现有 CLI 的明确请求，不是产品内置的自动学习功能。只说“记住这件事”不会自动创建 Brain 规则。接入或依赖规则前，先检查生成的匹配范围；示例路径应按你的项目调整。
+```text
+$brain-remember 保存一条拦截规则：禁止直接修改 src/generated/，
+应该改 schema/api.json 再生成。允许修改 src/main.py。
+展示匹配范围，并检查正反例。
+```
 
-等效的手动命令是：
+技能会读取必要的项目上下文，生成范围明确的候选规则，先用 `learn --dry-run` 检查正反例，再按你的授权保存并验证。如果你说“只预览，不保存”，就停在候选阶段；路径不清楚时会先澄清。
+
+显式写 `$brain-remember` 是明确的入口。Codex 也可以按描述自动选择技能，但能否自发选中取决于模型。它是 AI 协助录入，不会后台收集整段聊天。“回复简短一点”等普通偏好继续放在指令或记忆中。
+
+也可以手动生成同一条候选规则：
 
 ```sh
 brain-lessons learn generated-client \
@@ -101,41 +114,32 @@ brain-lessons learn generated-client \
   --path "src/generated/*" \
   --sample-path "src/generated/client.py" \
   --miss-path "src/main.py" \
-  --action block
+  --action block --dry-run
+```
 
+此时只输出候选 JSON、样例检查结果和问题，不保存文件。确认范围后，去掉同一条命令末尾的 `--dry-run` 执行，再检查：
+
+```sh
 brain-lessons check
 brain-lessons recall --tool Edit --path src/generated/client.py
+brain-lessons recall --tool Edit --path src/main.py
 ```
 
-规则保存在 `.brain/lessons/generated-client.json`。若这是项目的第一条规则，`check` 应显示两个样例、零问题；`recall` 应显示这条阻止规则及其来源，不会真的执行编辑。你可以直接修改该文件、审阅后随项目提交，或把 `enabled` 改成 `false` 停用。同名规则不会被静默覆盖。
+空教训库应得到一条规则、两个样例、零问题；第一个预览应命中阻止规则，第二个不命中。规则保存在 `.brain/lessons/generated-client.json`。同名规则不会被静默覆盖。默认是 `remind`，只有明确选择 `block` 才阻止。
 
-默认动作为 `remind`，只有显式选择 `block` 才阻止。先用 `recall` 看触发结果，再安装集成。
+### 3. 照常工作，需要时可以撤销
 
-### 3. 为这个项目接入一次 Codex
-
-在规则所属项目执行：
+hook 生效后，宿主自动检查匹配的调用。改规则在下一次调用生效，无须重新安装；hook 定义改变则需要重新审阅信任。生成路径规则覆盖 Codex 的 `apply_patch`，包括多文件补丁和移动两端；不会分析任意 shell 命令写入的文件。
 
 ```sh
-brain-lessons install codex
+brain-lessons uninstall codex --with-skill
 ```
 
-安装器只合并项目 `.codex/hooks.json` 中自己的一条 `PreToolUse` hook，保留其他 hook 和配置。支持 Codex 命令调用与 `apply_patch`，包括多文件补丁、删除和移动前后的路径。
+撤销移除自己的 hook 和未被修改的技能文件，保留教训、其他 hook 和其他技能。手工改过的技能保留并提示冲突。不加 `--with-skill` 时，保持原来的仅管理 hook 的行为。
 
-在该项目重新开始 Codex 会话。项目必须受信任、hooks 必须启用，并且需要你在 **`/hooks` 中审阅和信任这条 hook**。如果此前关闭过 hooks，可用 `codex --enable hooks` 启动 CLI。安装器不会替你授予信任，也不会修改全局 Codex 配置；hook 定义更新后需重新审阅。
+`remind` 注入上下文；`block` 对命中的调用返回宿主 `deny` 决策。Brain 不替宿主放行权限，也不保证所有未来行为。官方说明见 [Codex hooks](https://learn.chatgpt.com/docs/hooks) 和 [技能发现机制](https://learn.chatgpt.com/docs/build-skills)。安装支持 macOS、Linux；目前只有 macOS 完成原生宿主验收。
 
-完成信任后，照常与 Codex 对话和写代码。每次编辑前不用再手动运行 Brain 命令，宿主会调用 hook，只有定义好的匹配条件才会触发规则。
-
-撤销集成：
-
-```sh
-brain-lessons uninstall codex
-```
-
-撤销只移除 Codex 的这条 hook，保留规则。自动安装当前支持 macOS 和 Linux。
-
-**提醒与阻止不同。** `remind` 注入补充上下文，不保证当前调用停止，也不保证模型遵守；`block` 返回宿主协议的 `deny` 决策。Brain 不返回 `allow`，不会替宿主放行权限。CLI 与协议有自动测试，真实模型行为需要单独实测。
-
-官方协议见 [Codex hooks](https://learn.chatgpt.com/docs/hooks)。
+**第一次试用？** 按[试用说明](docs/try-it.zh-CN.md)完成一条自己的规则，再反馈哪里卡住、哪里误拦，或者为什么普通指令已经够用。
 
 ## Claude Code 兼容入口
 

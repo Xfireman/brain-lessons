@@ -125,7 +125,7 @@ def run_case(enabled):
             value = json.loads(path.read_text())
             value['enabled'] = False
             path.write_text(json.dumps(value))
-    cli('install', 'codex')
+    cli('install', 'codex', '--with-skill')
     requests = []
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -172,6 +172,11 @@ def run_case(enabled):
     client = None
     try:
         client = Client(env, work)
+        skills = client.call('skills/list', {'cwds': [str(work)], 'forceReload': True})['data'][0]
+        assert not skills['errors'], skills['errors']
+        discovered = [s for s in skills['skills'] if s['name'] == 'brain-remember']
+        assert len(discovered) == 1, discovered
+        assert Path(discovered[0]['path']) == work / '.agents/skills/brain-remember/SKILL.md', discovered
         hooks = client.call('hooks/list', {'cwds': [str(work)]})['data'][0]
         assert not hooks['errors'], hooks['errors']
         matching = [h for h in hooks['hooks'] if str(work / '.codex/hooks.json') == h['sourcePath']]
@@ -194,7 +199,7 @@ def run_case(enabled):
         client.call('turn/start', {'threadId': tid, 'input': [{'type': 'text', 'text': 'Run the local synthetic smoke fixture.', 'text_elements': []}]})
         client.until(lambda x: x.get('method') == 'turn/completed', 60)
         runs = [e['params']['run'] for e in client.events if e.get('method') == 'hook/completed']
-        result = {'enabled': enabled, 'hook_statuses': [r['status'] for r in runs],
+        result = {'enabled': enabled, 'skill_discovered': True, 'hook_statuses': [r['status'] for r in runs],
                   'blocked_shell_exists': (work / 'blocked.txt').exists(), 'generated_exists': (work / 'generated.py').exists(),
                   'allowed_exists': (work / 'allowed.txt').exists(),
                   'reminder_reached_model_input': any(x['reminder_visible'] for x in requests)}
