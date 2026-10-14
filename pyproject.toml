@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brain-lessons"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turn corrections into local project rules for your coding agent."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Brain Lessons contributors"}]
-keywords = ["ai", "agents", "memory", "claude-code", "developer-tools"]
+keywords = ["ai", "agents", "memory", "codex", "claude-code", "developer-tools"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

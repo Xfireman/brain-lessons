@@ -298,6 +298,97 @@ class ProductTest(unittest.TestCase):
         self.assertEqual(body["permissionDecision"], "deny")
         self.assertIn("项目规则 🧠", body["permissionDecisionReason"])
 
+    def test_codex_install_is_reversible_and_coexists_with_claude(self):
+        self.save(lesson(action="block"))
+        target = self.root / ".codex/hooks.json"
+        target.parent.mkdir()
+        unrelated = {"matcher": "Read", "hooks": [{"type": "command", "command": "echo existing"}]}
+        target.write_text(json.dumps({"description": "My hooks", "hooks": {"PreToolUse": [unrelated]}}))
+        p = self.cli("install", "codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("/hooks", p.stdout)
+        first = target.read_bytes()
+        self.assertIn("codex_entry", json.loads((self.root / ".brain/installation.json").read_text()))
+        self.assertEqual(self.cli("install", "codex").returncode, 0)
+        self.assertEqual(first, target.read_bytes())
+        self.assertEqual(self.cli("install", "claude-code").returncode, 0)
+        claude = (self.root / ".claude/settings.local.json").read_bytes()
+        value = json.loads(first)
+        self.assertEqual(value["description"], "My hooks")
+        self.assertEqual(len(value["hooks"]["PreToolUse"]), 2)
+        value["later"] = "user edit"
+        target.write_text(json.dumps(value))
+        self.assertEqual(self.cli("uninstall", "codex").returncode, 0)
+        result = json.loads(target.read_text())
+        self.assertEqual(result["hooks"]["PreToolUse"], [unrelated])
+        self.assertEqual(result["later"], "user edit")
+        self.assertEqual((self.root / ".claude/settings.local.json").read_bytes(), claude)
+        self.assertTrue((self.root / ".brain/installation.json").exists())
+        self.assertNotIn("codex_entry", json.loads((self.root / ".brain/installation.json").read_text()))
+
+    def test_codex_shell_supports_canonical_and_exec_shapes(self):
+        self.save(lesson(action="block"))
+        for tool, values in [("Bash", {"command": "npm test"}), ("exec_command", {"cmd": "npm test"})]:
+            p = self.cli("hook", "--adapter", "codex", input=self.payload(tool_name=tool, tool_input=values))
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_codex_shell_workdir_outside_project_is_not_injected(self):
+        self.save(lesson(action="block"))
+        p = self.cli("hook", "--adapter", "codex", input=self.payload(tool_input={"command": "npm test", "workdir": str(self.root.parent)}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout, "")
+
+    def test_codex_patch_add_update_delete_and_move_match_paths(self):
+        self.save(lesson("generated", "block", match={"tools": ["Edit", "Write"], "commands": [], "paths": ["src/generated/*"]}))
+        patches = [
+            "*** Add File: src/generated/client.py\n+value = 1",
+            "*** Update File: src/generated/client.py\n@@\n-old\n+new",
+            "*** Delete File: src/generated/client.py",
+            "*** Update File: src/generated/client.py\n*** Move to: src/client.py\n@@\n-old\n+new",
+            "*** Update File: src/client.py\n*** Move to: src/generated/client.py\n@@\n-old\n+new",
+        ]
+        for patch in patches:
+            with self.subTest(operation=patch.splitlines()[0]):
+                raw = self.payload(tool_name="apply_patch", tool_input={"command": "*** Begin Patch\n" + patch + "\n*** End Patch"})
+                p = self.cli("hook", "--adapter", "codex", input=raw)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        safe = "*** Begin Patch\n*** Add File: src/client.py\n+value = 1\n*** End Patch"
+        self.assertEqual(self.cli("hook", "--adapter", "codex", input=self.payload(tool_name="apply_patch", tool_input={"command": safe})).stdout, "")
+
+    def test_codex_multifile_patch_preserves_block_priority_and_deduplicates(self):
+        for identity in ("a", "b", "c", "d"):
+            self.save(lesson(identity, match={"tools": ["Write"], "commands": [], "paths": ["a.py", "b.py"]}))
+        self.save(lesson("z-deny", "block", match={"tools": ["Write"], "commands": [], "paths": ["b.py"]}))
+        patch = "*** Begin Patch\n*** Add File: a.py\n+1\n*** Add File: b.py\n+2\n*** End Patch"
+        p = self.cli("hook", "--adapter", "codex", input=self.payload(tool_name="apply_patch", tool_input={"command": patch}))
+        body = json.loads(p.stdout)["hookSpecificOutput"]
+        self.assertEqual(body["permissionDecision"], "deny")
+        self.assertIn("z-deny.json", body["permissionDecisionReason"])
+        self.assertEqual(body["permissionDecisionReason"].count("a.json"), 1)
+        self.assertIn("2 additional", body["permissionDecisionReason"])
+
+    def test_codex_bad_patch_does_not_echo_content(self):
+        self.save(lesson())
+        p = self.cli("hook", "--adapter", "codex", input=self.payload(tool_name="apply_patch", tool_input={"command": "PRIVATE_PATCH_SENTINEL"}))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout, "")
+        self.assertTrue(p.stderr)
+        self.assertNotIn("PRIVATE_PATCH_SENTINEL", p.stderr)
+
+    def test_codex_installed_command_runs_the_actual_patch_adapter(self):
+        self.save(lesson("generated", "block", match={"tools": ["Write"], "commands": [], "paths": ["generated.py"]}))
+        p = self.cli("install", "codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        config = json.loads((self.root / ".codex/hooks.json").read_text())
+        command = config["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        patch = "*** Begin Patch\n*** Add File: generated.py\n+value = 1\n*** End Patch"
+        raw = self.payload(tool_name="apply_patch", tool_input={"command": patch})
+        result = subprocess.run(command, shell=True, input=raw, text=True, capture_output=True, env=self.env, cwd=self.root, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_demo_does_not_modify_callers_project(self):
         p = self.cli("demo")
         self.assertEqual(p.returncode, 0, p.stderr)

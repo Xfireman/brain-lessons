@@ -185,8 +185,12 @@ def matches(lesson, root: Path, tool: str, command="", path="", cwd=None, *, inc
 
 
 def recall(root, tool, command="", path="", cwd=None):
+    return recall_many(root, [{"tool": tool, "command": command, "path": path, "cwd": cwd}])
+
+
+def recall_many(root, calls):
     lessons, problems = load_lessons(root)
-    hits = [x for x in lessons if matches(x, root, tool, command, path, cwd)]
+    hits = [x for x in lessons if any(matches(x, root, **call) for call in calls)]
     hits.sort(key=lambda x: (x["action"] != "block", x["id"]))
     decision = "block" if any(x["action"] == "block" for x in hits) else ("remind" if hits else "none")
     shown = [{"id": x["id"], "title": x["title"], "instruction": x["instruction"],

@@ -7,6 +7,7 @@ import sys
 import tempfile
 
 from . import __version__
+from .adapters import ADAPTERS
 from .core import LessonError, check, context, find_root, load_lessons, recall, safe_path, validate
 from .hooks import hook, install, uninstall
 
@@ -38,8 +39,9 @@ def parser():
     chk.add_argument("--json", action="store_true")
     for verb in ("install", "uninstall"):
         cmd = sub.add_parser(verb, help=verb.capitalize() + " the project-local hook")
-        cmd.add_argument("adapter", choices=["claude-code"])
-    sub.add_parser("hook", help="Read a Claude Code PreToolUse event on stdin")
+        cmd.add_argument("adapter", choices=ADAPTERS)
+    handler = sub.add_parser("hook", help="Read a host PreToolUse event on stdin")
+    handler.add_argument("--adapter", choices=ADAPTERS, default="claude-code", help="Host protocol (legacy default: claude-code; installers set it explicitly)")
     sub.add_parser("demo", help="Run a synthetic, offline demo in a disposable directory")
     return p
 
@@ -90,12 +92,12 @@ def demo():
         directory = root / ".brain/lessons"
         directory.mkdir(parents=True)
         (directory / "project-tests.json").write_text(json.dumps(rule), encoding="utf-8")
-        print("BRAIN LESSONS / OFFLINE DEMO\n")
+        print("BRAIN LESSONS / CODEX OFFLINE DEMO\n")
         print("1. Correction saved: this project uses pnpm test.")
         for command in ("npm test", "pnpm test"):
             payload = {"hook_event_name": "PreToolUse", "cwd": str(root), "tool_name": "Bash", "tool_input": {"command": command}}
             output = io.StringIO()
-            hook(root, io.StringIO(json.dumps(payload)), output, sys.stderr)
+            hook(root, io.StringIO(json.dumps(payload)), output, sys.stderr, adapter="codex")
             if output.getvalue():
                 body = json.loads(output.getvalue())["hookSpecificOutput"]
                 assert body["permissionDecision"] == "deny"
@@ -115,7 +117,7 @@ def main(argv=None):
         if not root.is_dir():
             raise LessonError("Project directory does not exist")
         if args.verb == "hook":
-            return hook(root if args.root else None, sys.stdin, sys.stdout, sys.stderr)
+            return hook(root if args.root else None, sys.stdin, sys.stdout, sys.stderr, args.adapter)
         if args.verb == "init":
             init(root)
         elif args.verb == "learn":
@@ -148,9 +150,9 @@ def main(argv=None):
                     print(problem)
             return int(bool(result["problems"]))
         elif args.verb == "install":
-            print(install(root))
+            print(install(root, args.adapter))
         elif args.verb == "uninstall":
-            print(uninstall(root))
+            print(uninstall(root, args.adapter))
         return 0
     except (LessonError, OSError) as exc:
         message = str(exc) if isinstance(exc, LessonError) else "Filesystem operation failed; check local permissions"

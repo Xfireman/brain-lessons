@@ -6,6 +6,7 @@ build/
 dist/
 .brain/
 .claude/
+.codex/
 .env
 .env.*
 .DS_Store

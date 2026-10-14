@@ -32,6 +32,14 @@ Paths use case-sensitive `fnmatch` on normalized project-relative paths. Supply 
 
 `--root` is a global CLI option and must appear before the subcommand. With it, relative preview paths are interpreted inside that project. Without it, discovery stops at the nearest `.brain` directory or Git repository boundary, and preview paths are relative to the current directory. Hook calls outside the installed project or inside a nested repository receive no parent-project rules.
 
+## Codex input mapping
+
+Codex's canonical `Bash` tool maps to the shared `Bash` lesson tool. Its `exec_command`/`cmd` form is also accepted by the adapter. An explicit shell `workdir` is respected; calls outside the installed project do not receive its rules.
+
+`apply_patch` add operations map to `Write`; update and delete map to `Edit`. Moves inspect both source and destination. Rules may also name `apply_patch` directly. A lesson matching multiple files appears once, and a block on any file denies the whole patch. All matches are combined before applying the display cap, so a later blocked file cannot be hidden by earlier reminders.
+
+These mappings do not infer file reads or writes from arbitrary shell commands. The adapter reads patch headers; it never evaluates or persists patch contents. Malformed patch envelopes return no decision with a diagnostic.
+
 ## Actions
 
 - `remind`: return additional context to the host. The current tool call is not stopped.

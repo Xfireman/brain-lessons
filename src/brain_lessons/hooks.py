@@ -7,14 +7,16 @@ import shlex
 import sys
 import tempfile
 
-from .core import LessonError, context, find_root, recall, safe_path
+from .adapters import normalize, working_directory
+from .core import LessonError, context, find_root, recall_many, safe_path
 
 MAX_PAYLOAD = 262144
-SETTINGS = ".claude/settings.local.json"
+SETTINGS = {"codex": ".codex/hooks.json", "claude-code": ".claude/settings.local.json"}
 MANIFEST = ".brain/installation.json"
+SLOT = {"codex": "codex_entry", "claude-code": "entry"}
 
 
-def hook(root, stdin, stdout, stderr):
+def hook(root, stdin, stdout, stderr, adapter="claude-code"):
     try:
         raw = stdin.read(MAX_PAYLOAD + 1)
         if len(raw) > MAX_PAYLOAD:
@@ -30,6 +32,7 @@ def hook(root, stdin, stdout, stderr):
         if event != "PreToolUse" or not isinstance(value, dict) or not isinstance(tool, str) or not isinstance(cwd, str):
             raise LessonError("Invalid hook fields")
         working = Path(cwd).resolve()
+        working = working_directory(adapter, tool, value, working)
         if not working.is_dir():
             raise LessonError("Invalid working directory")
         project = root or find_root(working)
@@ -38,10 +41,7 @@ def hook(root, stdin, stdout, stderr):
         # A hook installed in a parent project must not inject into a nested repo.
         if find_root(working) != project:
             return 0
-        command, path = value.get("command", ""), value.get("file_path", "")
-        if not isinstance(command, str) or not isinstance(path, str):
-            raise LessonError("Invalid tool fields")
-        result = recall(project, tool, command, path, working)
+        result = recall_many(project, normalize(adapter, tool, value, working))
         if result["problems"]:
             print("brain-lessons: invalid local rules; run brain-lessons check", file=stderr)
         if not result["matches"]:
@@ -100,18 +100,19 @@ def hook_groups(settings):
     return groups
 
 
-def install(root):
+def install(root, adapter="claude-code"):
     if os.name != "posix":
         raise LessonError("Automatic hook installation currently supports macOS and Linux only")
-    settings_path = safe_path(root, SETTINGS)
+    settings_path = safe_path(root, SETTINGS[adapter])
     manifest_path = safe_path(root, MANIFEST)
     settings = read_object(settings_path)
     manifest = read_object(manifest_path)
     groups = hook_groups(settings)
     entry_script = str(Path(__file__).resolve().with_name("entry.py"))
-    command = shlex.join([sys.executable, "-I", entry_script, "--root", str(root), "hook"])
-    entry = {"matcher": "Bash|Read|Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": command, "timeout": 5}]}
-    previous = manifest.get("entry")
+    command = shlex.join([sys.executable, "-I", entry_script, "--root", str(root), "hook", "--adapter", adapter])
+    matcher = "^(Bash|apply_patch)$" if adapter == "codex" else "Bash|Read|Edit|Write|MultiEdit"
+    entry = {"matcher": matcher, "hooks": [{"type": "command", "command": command, "timeout": 5}]}
+    previous = manifest.get(SLOT[adapter])
     if previous == entry and entry in groups:
         return "Already installed; settings unchanged."
     if previous is not None:
@@ -123,7 +124,8 @@ def install(root):
     groups.append(entry)
     # Roll back ownership if the settings write fails, so a retry is safe.
     manifest_existed = manifest_path.exists()
-    write_object(manifest_path, {"schema_version": 1, "entry": entry})
+    updated_manifest = {**manifest, "schema_version": 1, SLOT[adapter]: entry}
+    write_object(manifest_path, updated_manifest)
     try:
         write_object(settings_path, settings)
     except OSError:
@@ -132,16 +134,20 @@ def install(root):
         else:
             manifest_path.unlink()
         raise
+    if adapter == "codex":
+        return "Installed in .codex/hooks.json. Start a new Codex session in this trusted project, then review and trust the exact hook in /hooks. Hooks must be enabled."
     return "Installed in .claude/settings.local.json. Start a new Claude Code session and review /hooks."
 
 
-def uninstall(root):
-    settings_path = safe_path(root, SETTINGS)
+def uninstall(root, adapter="claude-code"):
+    settings_path = safe_path(root, SETTINGS[adapter])
     manifest_path = safe_path(root, MANIFEST)
     if not manifest_path.exists():
         return "No managed installation found; settings unchanged."
     manifest = read_object(manifest_path)
-    previous = manifest.get("entry")
+    previous = manifest.get(SLOT[adapter])
+    if previous is None:
+        return "No managed hook for this adapter; settings unchanged."
     if not isinstance(previous, dict):
         raise LessonError("Invalid installation record; settings unchanged")
     settings = read_object(settings_path)
@@ -151,8 +157,12 @@ def uninstall(root):
         raise LessonError("Managed hook changed; refusing to remove user edits")
     groups.remove(previous)
     write_object(settings_path, settings)
+    updated_manifest = {key: value for key, value in manifest.items() if key != SLOT[adapter]}
     try:
-        manifest_path.unlink()
+        if set(updated_manifest) <= {"schema_version"}:
+            manifest_path.unlink()
+        else:
+            write_object(manifest_path, updated_manifest)
     except OSError:
         write_object(settings_path, original_settings)
         raise
