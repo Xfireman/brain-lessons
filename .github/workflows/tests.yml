@@ -36,4 +36,4 @@ jobs:
           node-version: '22'
       - run: npm install --global @openai/codex@0.162.1
       - run: python -m pip install .
-      - run: python -B tests/native_codex.py --cli "$(command -v brain-lessons)"
+      - run: python -B tests/native_codex.py --cli "$(command -v brain-lessons)" --legacy-landlock

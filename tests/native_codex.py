@@ -20,6 +20,7 @@ import time
 SOURCE = Path(__file__).resolve().parents[1] / 'src'
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--cli', type=Path, help='Use an installed brain-lessons executable instead of source')
+parser.add_argument('--legacy-landlock', action='store_true', help='Use Codex legacy Landlock for CI workers that forbid user namespaces')
 options = parser.parse_args()
 cli_command = [str(options.cli.resolve())] if options.cli else [sys.executable, '-m', 'brain_lessons']
 base = Path(tempfile.mkdtemp(prefix='brain-codex-native-')).resolve()
@@ -165,7 +166,7 @@ def run_case(enabled):
               # CI workers may forbid bwrap network namespaces. Commands are fixed,
               # synthetic local writes; keep filesystem sandboxing and hook trust.
               '[sandbox_workspace_write]\nnetwork_access = true\n'
-              '[features]\nhooks = true\n'
+              '[features]\nhooks = true\n' + ('use_legacy_landlock = true\n' if options.legacy_landlock else '') +
               '[model_providers.fixture]\nname = "Local fixture"\nwire_api = "responses"\n'
               f'base_url = "http://127.0.0.1:{server.server_port}/v1"\nrequires_openai_auth = false\n'
               f'[projects.{json.dumps(str(work))}]\ntrust_level = "trusted"\n')
@@ -191,11 +192,13 @@ def run_case(enabled):
         assert any(h['key'] == entry['key'] and h['trustStatus'] == 'trusted' for h in current), current
         started = client.call('thread/start', {'cwd': str(work), 'ephemeral': True, 'approvalPolicy': 'never',
                                               'sandbox': 'workspace-write', 'baseInstructions': 'Run only the synthetic fixture calls. No other tools.'})
+        assert started['sandbox']['type'] == 'workspaceWrite', 'Filesystem sandbox must remain enabled'
+        assert started['sandbox']['networkAccess'] is True, 'Fixture network setting was not applied'
         tid = started['thread']['id']
         client.call('turn/start', {'threadId': tid, 'input': [{'type': 'text', 'text': 'Run the local synthetic smoke fixture.', 'text_elements': []}]})
         client.until(lambda x: x.get('method') == 'turn/completed', 60)
         runs = [e['params']['run'] for e in client.events if e.get('method') == 'hook/completed']
-        result = {'enabled': enabled, 'hook_statuses': [r['status'] for r in runs],
+        result = {'enabled': enabled, 'legacy_landlock': options.legacy_landlock, 'hook_statuses': [r['status'] for r in runs],
                   'blocked_shell_exists': (work / 'blocked.txt').exists(), 'generated_exists': (work / 'generated.py').exists(),
                   'allowed_exists': (work / 'allowed.txt').exists(),
                   'reminder_reached_model_input': any(x['reminder_visible'] for x in requests)}
