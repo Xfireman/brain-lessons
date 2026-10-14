@@ -25,7 +25,7 @@ jobs:
       - run: python -m pip install .
       - run: brain-lessons demo
   codex-native:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,4 +36,4 @@ jobs:
           node-version: '22'
       - run: npm install --global @openai/codex@0.162.1
       - run: python -m pip install .
-      - run: python -B tests/native_codex.py --cli "$(command -v brain-lessons)" --legacy-landlock
+      - run: python -B tests/native_codex.py --cli "$(command -v brain-lessons)"

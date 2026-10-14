@@ -81,7 +81,7 @@ To remove the integration while keeping your lessons:
 brain-lessons uninstall codex
 ```
 
-Native smoke tests use **Codex CLI 0.162.1** with a local synthetic response server. With rules disabled, the fixture commands and patch execute; with rules enabled, Codex blocks the selected shell call and patch while a permitted command still runs. This verifies actual host enforcement without a paid model call. Other Codex surfaces need the compatible hook runtime and access to the installed Python executable.
+Native smoke tests use **Codex CLI 0.162.1 on macOS** with a local synthetic response server. With rules disabled, the fixture commands and patch execute; with rules enabled, Codex blocks the selected shell call and patch while a permitted command still runs. This verifies actual host enforcement without a paid model call. Other Codex surfaces need the compatible hook runtime and access to the installed Python executable.
 
 Live model obedience is a separate outcome: a reminder is additional context, not a guarantee that the agent will change its next action. A block returns the host's explicit `deny` decision. Brain never returns an `allow` decision and never grants permissions.
 
@@ -148,6 +148,6 @@ python3 -B tests/native_codex.py
 
 It creates an isolated Codex home, records trust only for the reviewed fixture hook's exact hash, and uses a loopback response server. It does not use your login, modify your real Codex settings, or measure a model's intelligence. The CI runs this test separately from the CLI suite.
 
-The temporary test sandbox permits networking because some CI workers cannot create a network namespace. The Linux CI job explicitly passes `--legacy-landlock` to use Codex 0.162.1's legacy filesystem sandbox where user namespaces are unavailable. This option is only for that test; it is not an automatic fallback or a product setting. Filesystem sandboxing and hook trust remain enabled; the fixture's provider is loopback and its tool calls only write synthetic local files. Normal installation never changes sandbox or network settings.
+The native CI job runs on macOS with Codex's default workspace filesystem sandbox and tool network isolation. Linux runs the CLI integration suite; native Linux enforcement has not been validated for this release because the hosted Ubuntu worker cannot start Codex's bubblewrap namespaces. The test does not relax the sandbox or silently switch backends. Normal installation never changes sandbox or network settings.
 
 If Brain helps, contribute a **synthetic** lesson and a failing example it catches. Please never upload a real transcript, credential, or internal project configuration.
