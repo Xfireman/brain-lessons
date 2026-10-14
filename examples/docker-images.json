@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "docker-images",
+  "title": "Container images are pinned in this project",
+  "instruction": "This project's external base images use immutable digests. Verify the selected image digest before changing a FROM instruction.",
+  "action": "remind",
+  "enabled": true,
+  "match": {"tools": ["Edit", "Write"], "commands": [], "paths": ["Dockerfile", "**/Dockerfile"]},
+  "examples": {
+    "match": [{"tool": "Write", "path": "Dockerfile"}, {"tool": "Edit", "path": "services/api/Dockerfile"}],
+    "miss": [{"tool": "Edit", "path": "README.md"}]
+  }
+}

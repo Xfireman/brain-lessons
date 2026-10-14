@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "generated-client",
+  "title": "Generated client files have a source of truth",
+  "instruction": "Files in src/generated are generated from schema/api.json. Changes belong in the schema, followed by regeneration.",
+  "action": "remind",
+  "enabled": true,
+  "match": {"tools": ["Edit", "Write"], "commands": [], "paths": ["src/generated/*"]},
+  "examples": {
+    "match": [{"tool": "Edit", "path": "src/generated/client.py"}],
+    "miss": [{"tool": "Edit", "path": "src/client.py"}, {"tool": "Read", "path": "src/generated/client.py"}]
+  }
+}

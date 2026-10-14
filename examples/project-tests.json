@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "project-tests",
+  "title": "Use the project test runner",
+  "instruction": "This project uses pnpm test. The npm test command is not configured.",
+  "action": "block",
+  "enabled": true,
+  "match": {"tools": ["Bash"], "commands": ["npm test"], "paths": []},
+  "examples": {
+    "match": [{"tool": "Bash", "command": "npm test -- --watch"}],
+    "miss": [{"tool": "Bash", "command": "pnpm test"}, {"tool": "Bash", "command": "git status"}]
+  }
+}
