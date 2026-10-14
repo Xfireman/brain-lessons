@@ -25,6 +25,21 @@ cli_command = [str(options.cli.resolve())] if options.cli else [sys.executable, 
 base = Path(tempfile.mkdtemp(prefix='brain-codex-native-')).resolve()
 
 
+def tool_outputs(value):
+    """Only capture synthetic tool results, never dump prompts or tool schemas."""
+    found = []
+    if isinstance(value, dict):
+        if value.get('type') in ('function_call_output', 'custom_tool_call_output', 'tool_result') or value.get('role') == 'tool':
+            found.append({key: value[key] for key in ('type', 'role', 'output', 'content') if key in value})
+        else:
+            for child in value.values():
+                found.extend(tool_outputs(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(tool_outputs(child))
+    return found
+
+
 class Client:
     def __init__(self, env, work):
         self.events = []
@@ -119,7 +134,8 @@ def run_case(enabled):
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             tools = request.get('tools', [])
             index = len(requests)
-            requests.append({'path': self.path, 'reminder_visible': 'BRAIN_NATIVE_REMINDER' in json.dumps(request)})
+            requests.append({'path': self.path, 'reminder_visible': 'BRAIN_NATIVE_REMINDER' in json.dumps(request),
+                             'tool_outputs': tool_outputs(request)})
             if index in (0, 2):
                 command = 'printf BRAIN_SHOULD_NOT_RUN > blocked.txt' if index == 0 else 'printf BRAIN_ALLOWED > allowed.txt'
                 item = {'type': 'function_call', 'id': f'fc_{index}', 'call_id': f'call_{index}', 'name': 'exec_command',
@@ -190,7 +206,8 @@ def run_case(enabled):
                     diagnostics.append({k: item.get(k) for k in ('type', 'status', 'exitCode', 'aggregatedOutput')})
                 elif event.get('method') == 'error':
                     diagnostics.append(event.get('params', {}))
-            print('Native fixture diagnostics: ' + json.dumps(diagnostics)[:8000], flush=True)
+            details = json.dumps({'events': diagnostics, 'tool_outputs': [x['tool_outputs'] for x in requests]})
+            print('Native fixture diagnostics: ' + details[:12000] + (' [truncated]' if len(details) > 12000 else ''), flush=True)
         assert result['allowed_exists'], 'Allowed command did not execute'
         assert result['blocked_shell_exists'] == (not enabled), 'Shell decision not enforced'
         assert result['generated_exists'] == (not enabled), 'Patch decision not enforced'
