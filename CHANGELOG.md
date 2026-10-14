@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0
 
 - Added the optional Codex `brain-remember` skill for explicit, natural-language project corrections. It previews concrete scope, checks examples, and respects preview-only requests; it does not collect conversations automatically.
 - Added `learn --dry-run` to validate positive and negative examples without writing a rule. Existing rule IDs are reported as conflicts.
