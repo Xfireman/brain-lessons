@@ -1,27 +1,59 @@
 # Brain Lessons
 
-**Turn “I already told you that” into a project rule.**
+**Turn recurring corrections into checks that run when your coding agent acts.**
 
-Save a correction once. Brain selects it for matching tool calls, with its source attached. Remind the agent, or explicitly block a known wrong command.
+For project rules such as “edit the schema before regenerating the client” or “use this project's test runner,” Brain Lessons can surface the relevant instruction at the tool call and, when you explicitly choose `block`, refuse a matching operation.
+
+It packages rule storage, matching, examples, and host integration into one small tool. **It is an early rule-execution component:** saving a lesson is explicit; it does not automatically learn from conversations.
 
 Codex first · Claude Code supported · Local files · No model calls · Python 3.10+
 
 [中文](README.zh-CN.md) · [Rule format](docs/rules.md) · [Privacy & limits](SECURITY.md) · [Contribute](CONTRIBUTING.md)
 
+## A concrete problem it can help with
+
+Suppose `src/generated/` is produced from `schema/api.json`. Direct edits to generated files will disappear the next time the client is regenerated. You have already explained this convention, but the agent proposes another patch to a generated file.
+
+After you save the matching rule and enable the integration:
+
 ```text
-You: “This project uses pnpm test.”
-
-Next session, the agent proposes:
-  npm test     → BLOCK
-                 project-tests.json: use pnpm test
-
-Then it proposes:
-  pnpm test    → no Brain decision; normal permissions apply
+Codex proposes an apply_patch edit to src/generated/client.py
+  → Brain matches the generated-client rule
+  → The host refuses this patch
+  → The agent receives the reason and the rule's source:
+    “Update schema/api.json, then regenerate the client.”
 ```
 
-This is a deterministic hook example, not a recorded claim about model behavior. Try the real offline demo below.
+The immediate benefit is a repeatable check on that known mistake. The agent still has to choose the next correct action. A rule can also use `remind` to supply context while letting the current call continue.
 
-## Try it
+This example describes a matching tool call. It does not prevent every way of changing a file: an arbitrary shell script is outside this file-rule check.
+
+## Why not just tell Codex to remember?
+
+For preferences and general instructions, **telling Codex to remember is usually the simpler choice**. Memory and `AGENTS.md` can persist too; persistence alone is not Brain's differentiator.
+
+- **Stored instructions** inform the model, which then has to apply them to its actions.
+- **A Brain `block` rule** is checked by code at the tool boundary. With the hook installed, trusted, and enabled, the host rejects a matching call.
+- **A Brain `remind` rule** supplies the relevant instruction at that moment. It does not enforce compliance.
+
+You can also ask Codex to write equivalent hooks or checks directly. Brain packages that work into a shared format, repeatable validation, and reversible integrations; it does not give Codex an exclusive new ability.
+
+## When it earns its place
+
+Use it when the same mistake recurs, the triggering command or file pattern is clear, and you want:
+
+- **A check at the relevant action:** a generated-file patch or a known wrong command.
+- **Evidence you can inspect:** the matching lesson and its source are shown; `check` runs your positive and negative examples.
+- **Rules you can maintain:** ordinary JSON files that you can review, version, and reuse after checking their assumptions in the new project.
+- **A small integration to maintain:** the same lesson store works with Codex and Claude Code, with separate install/uninstall controls.
+
+For “reply in Chinese,” broad judgment calls such as “be more careful,” or occasional reminders, start with normal agent instructions. If you already maintain equivalent hooks and checks, keeping those may be simpler.
+
+Brain itself needs no API key, database, or background service. Your coding agent keeps its normal setup, and selected lessons still enter that host's context; see [privacy boundaries](SECURITY.md).
+
+**What this version does today:** you or your agent explicitly write lessons. The installed hook loads matching rules during tool calls. It does not archive conversations, automatically extract corrections, or replace a full personal knowledge system. There are no measured claims here about productivity, token savings, or error reduction.
+
+## Try the mechanism first
 
 Clone or download this repository, then run from its directory:
 
@@ -31,7 +63,13 @@ python3 -m venv .venv
 .venv/bin/brain-lessons demo
 ```
 
-The demo uses a temporary project and the Codex hook adapter. It runs no model or shell command and leaves your project unchanged.
+The offline demo uses a simpler test-runner rule: `npm test` is blocked, while `pnpm test` gets no Brain decision. It exercises the Codex adapter in a temporary project, without calling a model, executing those shell commands, or changing your project. It is a mechanism demo, not a recording of an agent learning on its own.
+
+## Use it in a project
+
+The workflow is **save one rule → preview its matches → install and trust the hook once → work normally**. Later lesson changes are loaded on subsequent tool calls; they do not require reinstalling the integration.
+
+### 1. Make the CLI available
 
 To use the installed CLI in your own project, add this virtual environment to the current shell's PATH before changing directories:
 
@@ -43,27 +81,37 @@ brain-lessons init
 
 Keep the virtual environment in place while its hook is installed.
 
-## Teach one lesson
+If Codex cannot find `brain-lessons`, give it the absolute path to `.venv/bin/brain-lessons` in the installation directory; a desktop app may not inherit this terminal's PATH.
+
+### 2. Save a rule yourself, or ask Codex to do it
+
+You do not have to type every `learn` command yourself. With the CLI available in the project, you can give Codex this request:
+
+> Use the installed `brain-lessons` CLI to save a project rule that blocks direct patch edits to `src/generated/`. The source of truth is `schema/api.json`; changes belong there before regenerating the client. Include an example that should match and one that should not, run `brain-lessons check`, and show me the saved rule and its matching scope.
+
+This is a request for Codex to operate the existing CLI, not a built-in automatic learning feature. Saying “remember this” alone does not create a Brain rule. Review the proposed scope before connecting or relying on it. Adapt these example paths to your project.
+
+The equivalent manual commands are:
 
 ```sh
-brain-lessons learn project-tests \
-  --title "Use the project test runner" \
-  --instruction "This project uses pnpm test. The npm test command is not configured." \
-  --tool Bash \
-  --command "npm test" \
-  --sample-command "npm test -- --watch" \
-  --miss-command "pnpm test" \
+brain-lessons learn generated-client \
+  --title "Generated clients follow the schema" \
+  --instruction "src/generated/ is produced from schema/api.json. Update the schema, then regenerate the client." \
+  --tool Edit --tool Write \
+  --path "src/generated/*" \
+  --sample-path "src/generated/client.py" \
+  --miss-path "src/main.py" \
   --action block
 
 brain-lessons check
-brain-lessons recall --tool Bash --command "npm test"
+brain-lessons recall --tool Edit --path src/generated/client.py
 ```
 
-Your correction lives in `.brain/lessons/project-tests.json`. Edit it directly, review it in Git, or set `enabled` to `false`. Learning the same ID again refuses to overwrite it.
+Your correction lives in `.brain/lessons/generated-client.json`. In an otherwise empty lesson store, `check` should report two examples and zero problems; `recall` should show this block rule and its source without executing an edit. Edit the file directly, review it in Git, or set `enabled` to `false`. Learning the same ID again refuses to overwrite it.
 
 `remind` is the default action. `block` must be chosen explicitly. Preview matching rules before installing the hook.
 
-## Connect Codex
+### 3. Connect Codex once for this project
 
 From the project where the rules should apply:
 
@@ -75,13 +123,13 @@ This adds one `PreToolUse` hook to **project-local** `.codex/hooks.json`, preser
 
 Start a new Codex session in this project. The project must be trusted, hooks must be enabled, and you must **review and trust the exact hook in `/hooks`** before it runs. If you disabled hooks, start the CLI with `codex --enable hooks`. Installing Brain does not grant hook trust or change your global Codex configuration. Changed hook definitions need review again.
 
+After trust is granted, work with Codex normally. There is no extra Brain command to run before each edit; the host invokes the hook. Only defined matches trigger a lesson.
+
 To remove the integration while keeping your lessons:
 
 ```sh
 brain-lessons uninstall codex
 ```
-
-Native smoke tests use **Codex CLI 0.162.1 on macOS** with a local synthetic response server. With rules disabled, the fixture commands and patch execute; with rules enabled, Codex blocks the selected shell call and patch while a permitted command still runs. This verifies actual host enforcement without a paid model call. Other Codex surfaces need the compatible hook runtime and access to the installed Python executable.
 
 Live model obedience is a separate outcome: a reminder is additional context, not a guarantee that the agent will change its next action. A block returns the host's explicit `deny` decision. Brain never returns an `allow` decision and never grants permissions.
 
@@ -98,17 +146,6 @@ brain-lessons uninstall claude-code
 Claude Code uses `.claude/settings.local.json`. Codex and Claude Code share the lesson store but install and uninstall independently. Start a new session and inspect `/hooks` after installation.
 
 See the [official Claude Code hook contract](https://code.claude.com/docs/en/hooks#pretooluse-decision-control). Other agents can call `recall` explicitly; native integrations are provided for Codex and Claude Code.
-
-## Why use this?
-
-Rules that apply to every task belong in your agent's normal project instructions. Brain is useful when a correction should surface for a particular command or file, and you want to see **which rule matched and why it is there**.
-
-- **Selective:** tools plus command phrases or project-relative path patterns.
-- **Inspectable:** ordinary JSON, readable provenance, authored examples.
-- **Reversible:** opt-in project installation, explicit uninstall.
-- **Local:** no account, background service, database, telemetry, or Brain-operated endpoint.
-
-Brain does not archive conversations, automatically extract lessons, or silently learn from your activity. You decide what gets saved.
 
 ## Commands
 
@@ -133,6 +170,8 @@ Use `--help` for arguments. Global `--root /path/to/project` goes before the com
 - This is an early release. No benchmark claim is made about productivity, token savings, or error reduction.
 
 ## Development
+
+Native smoke tests use **Codex CLI 0.162.1 on macOS** with a local synthetic response server. With rules disabled, the fixture commands and patch execute; with rules enabled, Codex blocks the selected shell call and patch while a permitted command still runs, and a reminder reaches the next model request. This verifies actual host behavior without a paid model call. Other Codex surfaces need the compatible hook runtime and access to the installed Python executable.
 
 ```sh
 python3 -B -m unittest discover -s tests -v
