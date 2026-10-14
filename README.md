@@ -148,4 +148,6 @@ python3 -B tests/native_codex.py
 
 It creates an isolated Codex home, records trust only for the reviewed fixture hook's exact hash, and uses a loopback response server. It does not use your login, modify your real Codex settings, or measure a model's intelligence. The CI runs this test separately from the CLI suite.
 
+The temporary test sandbox permits networking because some CI workers cannot create a network namespace. Filesystem sandboxing and hook trust remain enabled; the fixture's provider is loopback and its tool calls only write synthetic local files. Normal installation never changes sandbox or network settings.
+
 If Brain helps, contribute a **synthetic** lesson and a failing example it catches. Please never upload a real transcript, credential, or internal project configuration.

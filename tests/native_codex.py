@@ -162,6 +162,9 @@ def run_case(enabled):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     config = ('model = "gpt-6-astra"\nmodel_provider = "fixture"\n'
+              # CI workers may forbid bwrap network namespaces. Commands are fixed,
+              # synthetic local writes; keep filesystem sandboxing and hook trust.
+              '[sandbox_workspace_write]\nnetwork_access = true\n'
               '[features]\nhooks = true\n'
               '[model_providers.fixture]\nname = "Local fixture"\nwire_api = "responses"\n'
               f'base_url = "http://127.0.0.1:{server.server_port}/v1"\nrequires_openai_auth = false\n'
